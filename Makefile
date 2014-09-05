@@ -5,7 +5,7 @@ CFLAGS=-Wall -Werror\
 	-Wformat=2\
 	-g\
 
-LDFLAGS=
+LDFLAGS=-lm
 OS=$(shell uname|tr A-Z a-z)
 INSTALL=install
 
