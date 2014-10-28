@@ -222,6 +222,7 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
     "cmd-pause-tube: %u\n" \
     "pause: %" PRIu64 "\n" \
     "pause-time-left: %" PRId64 "\n" \
+    "average-waiting-time: %" PRId64 "\n" \
     "\r\n"
 
 #define STATS_JOB_FMT "---\n" \
@@ -1285,6 +1286,33 @@ fmt_job_stats(char *buf, size_t size, job j)
             j->r.kick_ct);
 }
 
+static int64 cal_average_createtime_of_n_jobs(void** data, int n)
+{
+    job j = data[0];
+    int64 first_job_time = j->r.created_at;
+    int64 average_create_time = 0;
+    int i;
+    for (i = 0; i < n ; ++i)
+    {
+        j = data[i];
+        average_create_time += (j->r.created_at - first_job_time);
+    }
+    return average_create_time / n + first_job_time;
+}
+
+static int64 gen_average_waiting_time_of_100_oldest(tube t)
+{
+    int check_len;
+    if (t->ready.len > 0){
+        int64 now = nanoseconds();
+        check_len = t->ready.len > 100 ? 100 : t->ready.len;
+        int64 aver_create_time = cal_average_createtime_of_n_jobs(t->ready.data, check_len);
+        return now - aver_create_time;
+    } else {
+        return 0L;
+    }
+}
+
 static int
 fmt_stats_tube(char *buf, size_t size, tube t)
 {
@@ -1295,6 +1323,7 @@ fmt_stats_tube(char *buf, size_t size, tube t)
     } else {
         time_left = 0;
     }
+    int64 average_waiting_time = gen_average_waiting_time_of_100_oldest(t);
     return snprintf(buf, size, STATS_TUBE_FMT,
             t->name,
             t->stat.urgent_ct,
@@ -1311,7 +1340,8 @@ fmt_stats_tube(char *buf, size_t size, tube t)
             t->stat.total_delete_ct,
             t->stat.pause_ct,
             t->pause / 1000000000,
-            time_left);
+            time_left,
+            average_waiting_time / 1000000000);
 }
 
 static void
@@ -1669,7 +1699,6 @@ dispatch_cmd(Conn *c)
 
         t = tube_find(name);
         if (!t) return reply_msg(c, MSG_NOTFOUND);
-
         do_stats(c, (fmt_fn) fmt_stats_tube, t);
         t = NULL;
         break;
