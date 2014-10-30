@@ -3,6 +3,7 @@ PREFIX=/usr/local
 BINDIR=$(DESTDIR)$(PREFIX)/bin
 CFLAGS=-Wall -Werror\
 	-Wformat=2\
+	-I/usr/include/jemalloc\
 	-g\
 
 LDFLAGS=-lm
