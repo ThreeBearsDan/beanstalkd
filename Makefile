@@ -4,7 +4,7 @@ BINDIR=$(DESTDIR)$(PREFIX)/bin
 CFLAGS=-Wall -Werror\
 	-Wformat=2\
 	-I/usr/include/jemalloc\
-	-g\
+	-O3
 
 LDFLAGS=-lm
 OS=$(shell uname|tr A-Z a-z)
