@@ -203,6 +203,9 @@ job allocate_job(int body_size);
 job make_job_with_id(uint pri, int64 delay, int64 ttr,
              int body_size, tube tube, uint64 id);
 void job_free(job j);
+void set_job_id_begin(uint64);
+uint64 get_job_id_begin();
+
 
 /* Lookup a job by job ID */
 job job_find(uint64 job_id);

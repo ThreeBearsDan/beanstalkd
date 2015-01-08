@@ -24,6 +24,8 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
     "abcdefghijklmnopqrstuvwxyz" \
     "0123456789-+/;.$_()"
 
+#define CMD_SHOW_CONFIG "show-config"
+#define CMD_LOAD_CONFIG "load-config"
 #define CMD_PUT "put "
 #define CMD_PEEKJOB "peek "
 #define CMD_PEEK_READY "peek-ready"
@@ -152,7 +154,8 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
 #define OP_UNBIND 26
 #define OP_LIST_BINDINGS 27
 #define OP_LIST_BURIED 28
-#define TOTAL_OPS 29
+#define OP_LOAD_CONFIG 29
+#define TOTAL_OPS 30 
 
 #define STATS_FMT "---\n" \
     "current-jobs-urgent: %u\n" \
@@ -764,6 +767,7 @@ static int
 which_cmd(Conn *c)
 {
 #define TEST_CMD(s,c,o) if (strncmp((s), (c), CONSTSTRLEN(c)) == 0) return (o);
+    TEST_CMD(c->cmd, CMD_LOAD_CONFIG, OP_LOAD_CONFIG);
     TEST_CMD(c->cmd, CMD_PUT, OP_PUT);
     TEST_CMD(c->cmd, CMD_PEEKJOB, OP_PEEKJOB);
     TEST_CMD(c->cmd, CMD_PEEK_READY, OP_PEEK_READY);
@@ -1418,6 +1422,22 @@ dispatch_cmd(Conn *c)
     }
 
     switch (type) {
+    case OP_LOAD_CONFIG:
+        if (strcmp(c->use->name,"_didi_config_") == 0){
+            if (c->use->ready.len) {
+                j = job_copy(c->use->ready.data[0]);
+                if(j){
+                    errno = 0;
+                    uint64 begin = strtoul(j->body, 0, 10);
+                    if(errno == 0){
+                        set_job_id_begin(begin);
+                        return reply_line(c, STATE_SENDWORD, "ID_BEGIN %"PRIu64"\r\n", get_job_id_begin());
+                    }
+                }
+            }
+        }
+        return reply_msg(c, "NOT_FOUND\r\n"); 
+        break;
     case OP_PUT:
         r = read_pri(&pri, c->cmd + 4, &delay_buf);
         if (r) return reply_msg(c, MSG_BAD_FORMAT);
@@ -1647,7 +1667,7 @@ dispatch_cmd(Conn *c)
         if (!j) return reply(c, MSG_NOTFOUND, MSG_NOTFOUND_LEN, STATE_SENDWORD);
 
         if ((j->r.state == Buried && kick_buried_job(c->srv, j)) ||
-            (j->r.state == Delayed && kick_delayed_job(c->srv, j))) {
+                (j->r.state == Delayed && kick_delayed_job(c->srv, j))) {
             reply(c, MSG_KICKED, MSG_KICKED_LEN, STATE_SENDWORD);
         } else {
             return reply(c, MSG_NOTFOUND, MSG_NOTFOUND_LEN, STATE_SENDWORD);
@@ -1821,7 +1841,7 @@ dispatch_cmd(Conn *c)
         if (!t || !t2) return reply_serr(c, MSG_OUT_OF_MEMORY);
 
         r = tube_bind(t, t2);
-        
+
         if (r==1) {
             r = migrate_jobs(c, t, t2);
             if (fanout_log) {
@@ -1829,7 +1849,7 @@ dispatch_cmd(Conn *c)
                 fflush(fanout_log);
             }
         }
-        
+
         if (!r) return reply_serr(c, MSG_OUT_OF_MEMORY);
 
         reply_line(c, STATE_SENDWORD, "BINDED\r\n");
@@ -1855,7 +1875,7 @@ dispatch_cmd(Conn *c)
             fprintf(fanout_log, "unbind %s %s\n", t->name, t2->name);
             fflush(fanout_log);
         }
-        
+
         tube_dref(t);
         tube_dref(t2);
 
@@ -1884,7 +1904,7 @@ dispatch_cmd(Conn *c)
  *  3. A waiting client's requested timeout has occurred.
  *
  * If any of these happen, we must do the appropriate thing. */
-static void
+    static void
 conn_timeout(Conn *c)
 {
     int r, should_timeout = 0;
@@ -1921,20 +1941,20 @@ conn_timeout(Conn *c)
     }
 }
 
-void
+    void
 enter_drain_mode(int sig)
 {
     drain_mode = 1;
 }
 
-static void
+    static void
 do_cmd(Conn *c)
 {
     dispatch_cmd(c);
     fill_extra_data(c);
 }
 
-static void
+    static void
 reset_conn(Conn *c)
 {
     connwant(c, 'r');
@@ -1949,7 +1969,7 @@ reset_conn(Conn *c)
     c->state = STATE_WANTCOMMAND;
 }
 
-static void
+    static void
 conn_data(Conn *c)
 {
     int r, to_read;
@@ -1957,129 +1977,129 @@ conn_data(Conn *c)
     struct iovec iov[2];
 
     switch (c->state) {
-    case STATE_WANTCOMMAND:
-        r = read(c->sock.fd, c->cmd + c->cmd_read, LINE_BUF_SIZE - c->cmd_read);
-        if (r == -1) return check_err(c, "read()");
-        if (r == 0) {
-            c->state = STATE_CLOSE;
-            return;
-        }
-
-        c->cmd_read += r; /* we got some bytes */
-
-        c->cmd_len = cmd_len(c); /* find the EOL */
-
-        /* yay, complete command line */
-        if (c->cmd_len) return do_cmd(c);
-
-        /* c->cmd_read > LINE_BUF_SIZE can't happen */
-
-        /* command line too long? */
-        if (c->cmd_read == LINE_BUF_SIZE) {
-            c->cmd_read = 0; /* discard the input so far */
-            return reply_msg(c, MSG_BAD_FORMAT);
-        }
-
-        /* otherwise we have an incomplete line, so just keep waiting */
-        break;
-    case STATE_BITBUCKET:
-        /* Invert the meaning of in_job_read while throwing away data -- it
-         * counts the bytes that remain to be thrown away. */
-        to_read = min(c->in_job_read, BUCKET_BUF_SIZE);
-        r = read(c->sock.fd, bucket, to_read);
-        if (r == -1) return check_err(c, "read()");
-        if (r == 0) {
-            c->state = STATE_CLOSE;
-            return;
-        }
-
-        c->in_job_read -= r; /* we got some bytes */
-
-        /* (c->in_job_read < 0) can't happen */
-
-        if (c->in_job_read == 0) {
-            return reply(c, c->reply, c->reply_len, STATE_SENDWORD);
-        }
-        break;
-    case STATE_WANTDATA:
-        j = c->in_job;
-
-        r = read(c->sock.fd, j->body + c->in_job_read, j->r.body_size -c->in_job_read);
-        if (r == -1) return check_err(c, "read()");
-        if (r == 0) {
-            c->state = STATE_CLOSE;
-            return;
-        }
-
-        c->in_job_read += r; /* we got some bytes */
-
-        /* (j->in_job_read > j->r.body_size) can't happen */
-
-        maybe_enqueue_incoming_job(c);
-        break;
-    case STATE_SENDWORD:
-        r= write(c->sock.fd, c->reply + c->reply_sent, c->reply_len - c->reply_sent);
-        if (r == -1) return check_err(c, "write()");
-        if (r == 0) {
-            c->state = STATE_CLOSE;
-            return;
-        }
-
-        c->reply_sent += r; /* we got some bytes */
-
-        /* (c->reply_sent > c->reply_len) can't happen */
-
-        if (c->reply_sent == c->reply_len) return reset_conn(c);
-
-        /* otherwise we sent an incomplete reply, so just keep waiting */
-        break;
-    case STATE_SENDJOB:
-        j = c->out_job;
-
-        iov[0].iov_base = (void *)(c->reply + c->reply_sent);
-        iov[0].iov_len = c->reply_len - c->reply_sent; /* maybe 0 */
-        iov[1].iov_base = j->body + c->out_job_sent;
-        iov[1].iov_len = j->r.body_size - c->out_job_sent;
-
-        r = writev(c->sock.fd, iov, 2);
-        if (r == -1) return check_err(c, "writev()");
-        if (r == 0) {
-            c->state = STATE_CLOSE;
-            return;
-        }
-
-        /* update the sent values */
-        c->reply_sent += r;
-        if (c->reply_sent >= c->reply_len) {
-            c->out_job_sent += c->reply_sent - c->reply_len;
-            c->reply_sent = c->reply_len;
-        }
-
-        /* (c->out_job_sent > j->r.body_size) can't happen */
-
-        /* are we done? */
-        if (c->out_job_sent == j->r.body_size) {
-            if (verbose >= 2) {
-                printf(">%d job %"PRIu64"\n", c->sock.fd, j->r.id);
+        case STATE_WANTCOMMAND:
+            r = read(c->sock.fd, c->cmd + c->cmd_read, LINE_BUF_SIZE - c->cmd_read);
+            if (r == -1) return check_err(c, "read()");
+            if (r == 0) {
+                c->state = STATE_CLOSE;
+                return;
             }
-            return reset_conn(c);
-        }
 
-        /* otherwise we sent incomplete data, so just keep waiting */
-        break;
-    case STATE_WAIT:
-        if (c->halfclosed) {
-            c->pending_timeout = -1;
-            return reply_msg(remove_waiting_conn(c), MSG_TIMED_OUT);
-        }
-        break;
+            c->cmd_read += r; /* we got some bytes */
+
+            c->cmd_len = cmd_len(c); /* find the EOL */
+
+            /* yay, complete command line */
+            if (c->cmd_len) return do_cmd(c);
+
+            /* c->cmd_read > LINE_BUF_SIZE can't happen */
+
+            /* command line too long? */
+            if (c->cmd_read == LINE_BUF_SIZE) {
+                c->cmd_read = 0; /* discard the input so far */
+                return reply_msg(c, MSG_BAD_FORMAT);
+            }
+
+            /* otherwise we have an incomplete line, so just keep waiting */
+            break;
+        case STATE_BITBUCKET:
+            /* Invert the meaning of in_job_read while throwing away data -- it
+             * counts the bytes that remain to be thrown away. */
+            to_read = min(c->in_job_read, BUCKET_BUF_SIZE);
+            r = read(c->sock.fd, bucket, to_read);
+            if (r == -1) return check_err(c, "read()");
+            if (r == 0) {
+                c->state = STATE_CLOSE;
+                return;
+            }
+
+            c->in_job_read -= r; /* we got some bytes */
+
+            /* (c->in_job_read < 0) can't happen */
+
+            if (c->in_job_read == 0) {
+                return reply(c, c->reply, c->reply_len, STATE_SENDWORD);
+            }
+            break;
+        case STATE_WANTDATA:
+            j = c->in_job;
+
+            r = read(c->sock.fd, j->body + c->in_job_read, j->r.body_size -c->in_job_read);
+            if (r == -1) return check_err(c, "read()");
+            if (r == 0) {
+                c->state = STATE_CLOSE;
+                return;
+            }
+
+            c->in_job_read += r; /* we got some bytes */
+
+            /* (j->in_job_read > j->r.body_size) can't happen */
+
+            maybe_enqueue_incoming_job(c);
+            break;
+        case STATE_SENDWORD:
+            r= write(c->sock.fd, c->reply + c->reply_sent, c->reply_len - c->reply_sent);
+            if (r == -1) return check_err(c, "write()");
+            if (r == 0) {
+                c->state = STATE_CLOSE;
+                return;
+            }
+
+            c->reply_sent += r; /* we got some bytes */
+
+            /* (c->reply_sent > c->reply_len) can't happen */
+
+            if (c->reply_sent == c->reply_len) return reset_conn(c);
+
+            /* otherwise we sent an incomplete reply, so just keep waiting */
+            break;
+        case STATE_SENDJOB:
+            j = c->out_job;
+
+            iov[0].iov_base = (void *)(c->reply + c->reply_sent);
+            iov[0].iov_len = c->reply_len - c->reply_sent; /* maybe 0 */
+            iov[1].iov_base = j->body + c->out_job_sent;
+            iov[1].iov_len = j->r.body_size - c->out_job_sent;
+
+            r = writev(c->sock.fd, iov, 2);
+            if (r == -1) return check_err(c, "writev()");
+            if (r == 0) {
+                c->state = STATE_CLOSE;
+                return;
+            }
+
+            /* update the sent values */
+            c->reply_sent += r;
+            if (c->reply_sent >= c->reply_len) {
+                c->out_job_sent += c->reply_sent - c->reply_len;
+                c->reply_sent = c->reply_len;
+            }
+
+            /* (c->out_job_sent > j->r.body_size) can't happen */
+
+            /* are we done? */
+            if (c->out_job_sent == j->r.body_size) {
+                if (verbose >= 2) {
+                    printf(">%d job %"PRIu64"\n", c->sock.fd, j->r.id);
+                }
+                return reset_conn(c);
+            }
+
+            /* otherwise we sent incomplete data, so just keep waiting */
+            break;
+        case STATE_WAIT:
+            if (c->halfclosed) {
+                c->pending_timeout = -1;
+                return reply_msg(remove_waiting_conn(c), MSG_TIMED_OUT);
+            }
+            break;
     }
 }
 
 #define want_command(c) ((c)->sock.fd && ((c)->state == STATE_WANTCOMMAND))
 #define cmd_data_ready(c) (want_command(c) && (c)->cmd_read)
 
-static void
+    static void
 update_conns()
 {
     int r;
@@ -2097,7 +2117,7 @@ update_conns()
     }
 }
 
-static void
+    static void
 h_conn(const int fd, const short which, Conn *c)
 {
     if (fd != c->sock.fd) {
@@ -2121,13 +2141,13 @@ h_conn(const int fd, const short which, Conn *c)
     update_conns();
 }
 
-static void
+    static void
 prothandle(Conn *c, int ev)
 {
     h_conn(c->sock.fd, ev, c);
 }
 
-int64
+    int64
 prottick(Server *s)
 {
     int r;
@@ -2179,7 +2199,7 @@ prottick(Server *s)
     return period;
 }
 
-void
+    void
 h_accept(const int fd, const short which, Server *s)
 {
     Conn *c;
@@ -2248,7 +2268,7 @@ h_accept(const int fd, const short which, Server *s)
     update_conns();
 }
 
-void
+    void
 prot_init()
 {
     started_at = nanoseconds();
@@ -2287,7 +2307,7 @@ prot_init()
 // structures and adds it to the log.
 //
 // Returns 1 on success, 0 on failure.
-int
+    int
 prot_replay(Server *s, job list)
 {
     job j, nj;
@@ -2304,24 +2324,24 @@ prot_replay(Server *s, job list)
         }
         delay = 0;
         switch (j->r.state) {
-        case Buried:
-            bury_job(s, j, 0);
-            break;
-        case Delayed:
-            t = nanoseconds();
-            if (t < j->r.deadline_at) {
-                delay = j->r.deadline_at - t;
-            }
-            /* fall through */
-        default:
-            r = enqueue_job(s, j, delay, 0);
-            if (r < 1) twarnx("error recovering job %"PRIu64, j->r.id);
+            case Buried:
+                bury_job(s, j, 0);
+                break;
+            case Delayed:
+                t = nanoseconds();
+                if (t < j->r.deadline_at) {
+                    delay = j->r.deadline_at - t;
+                }
+                /* fall through */
+            default:
+                r = enqueue_job(s, j, delay, 0);
+                if (r < 1) twarnx("error recovering job %"PRIu64, j->r.id);
         }
     }
     return 1;
 }
 
-int
+    int
 prot_load_fanout(char* dir)
 {
     int i,j;
@@ -2349,7 +2369,7 @@ prot_load_fanout(char* dir)
             return -1;
         }
     }
-    
+
     if (ftruncate(fileno(fanout_log), 0)) {
         twarnx("ftruncate failed"); 
         return -1;
@@ -2358,7 +2378,7 @@ prot_load_fanout(char* dir)
         tube t = tubes.items[i];
         for (j=0; j < t->fanout.used; j++) {
             fprintf(fanout_log, "bind %s %s\n", t->name, 
-                ((tube)t->fanout.items[j])->name); 
+                    ((tube)t->fanout.items[j])->name); 
         }
     }
     fflush(fanout_log);

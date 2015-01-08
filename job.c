@@ -4,6 +4,7 @@
 #include "dat.h"
 
 static uint64 next_id = 1;
+static uint64 begin_id = 1;
 
 static int cur_prime = 0;
 
@@ -70,6 +71,19 @@ rehash()
     if (old != all_jobs_init) {
         free(old);
     }
+}
+
+void
+set_job_id_begin(uint64 begin){
+    begin_id = begin;
+    if(begin_id > next_id)
+        next_id = begin_id;
+}
+
+uint64 
+get_job_id_begin()
+{
+    return begin_id;
 }
 
 job
