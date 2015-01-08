@@ -24,7 +24,6 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
     "abcdefghijklmnopqrstuvwxyz" \
     "0123456789-+/;.$_()"
 
-#define CMD_SHOW_CONFIG "show-config"
 #define CMD_LOAD_CONFIG "load-config"
 #define CMD_PUT "put "
 #define CMD_PEEKJOB "peek "
