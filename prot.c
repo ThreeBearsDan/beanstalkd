@@ -52,6 +52,7 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
 #define CMD_UNBIND "unbind"
 #define CMD_LIST_BINDINGS "list-bindings"
 #define CMD_LIST_BURIED "list-buried"
+#define CMD_LOAD_CONFIG "load-config"
 
 #define CONSTSTRLEN(m) (sizeof(m) - 1)
 
@@ -152,7 +153,8 @@ size_t job_data_size_limit = JOB_DATA_SIZE_LIMIT_DEFAULT;
 #define OP_UNBIND 26
 #define OP_LIST_BINDINGS 27
 #define OP_LIST_BURIED 28
-#define TOTAL_OPS 29
+#define OP_LOAD_CONFIG 29
+#define TOTAL_OPS 30 
 
 #define STATS_FMT "---\n" \
     "current-jobs-urgent: %u\n" \
@@ -792,6 +794,7 @@ which_cmd(Conn *c)
     TEST_CMD(c->cmd, CMD_UNBIND, OP_UNBIND);
     TEST_CMD(c->cmd, CMD_LIST_BINDINGS, OP_LIST_BINDINGS);
     TEST_CMD(c->cmd, CMD_LIST_BURIED, OP_LIST_BURIED);
+    TEST_CMD(c->cmd, CMD_LOAD_CONFIG, OP_LOAD_CONFIG);
     return OP_UNKNOWN;
 }
 
@@ -1871,6 +1874,21 @@ dispatch_cmd(Conn *c)
         op_ct[type]++;
         do_list_buried(c, c->use);
         break;
+    case OP_LOAD_CONFIG:
+        if (strcmp(c->use->name,"_didi_config_") == 0){
+            if (c->use->ready.len) {
+                j = job_copy(c->use->ready.data[0]);
+                if(j){
+                    errno = 0;
+                    uint64 begin = strtoul(j->body, 0, 10);
+                    if(errno == 0){
+                        set_job_id_begin(begin);
+                        return reply_line(c, STATE_SENDWORD, "ID_BEGIN %"PRIu64"\r\n", get_job_id_begin());
+                    }
+                }
+            }
+        }
+        return reply_msg(c, "NOT_FOUND\r\n");
     default:
         return reply_msg(c, MSG_UNKNOWN_COMMAND);
     }

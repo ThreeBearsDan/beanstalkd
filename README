@@ -43,3 +43,7 @@ Copyright © 2007-2013 the authors of beanstalkd.
 Copyright in contributions to beanstalkd is retained
 by the original copyright holder of each contribution.
 See file LICENSE for terms of use.
+
+EXTRA FEATURES
+
+ID_BEGIN customization: provide the customization of where job id begins from, which is mainly for beanstalkd proxy to sharding jobs. The begin id config is stored in "_didi_config_" tube, you should first post command "use _didi_config_", then "load-config" to expilicitly ask beanstalkd to load begin id.  As if the beanstalkd is newly created without config info, it will reply "NOT_FOUND". You should post a config to job into "_didi_config" tube, such as "put 1 1 60 5\r\n10000"."10000" means id begins from "10000". Then post "load-config" again to  be effective. It will reply "ID_BEGIN 10000" if it is successful. 
