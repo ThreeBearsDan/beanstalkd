@@ -6,7 +6,7 @@ CFLAGS=-Wall -Werror\
 	-I/usr/include/jemalloc\
 	-O3
 
-LDFLAGS=-lm
+LDFLAGS=-lm -ljemalloc
 OS=$(shell uname|tr A-Z a-z)
 INSTALL=install
 
