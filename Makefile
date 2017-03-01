@@ -3,10 +3,10 @@ PREFIX=/usr/local
 BINDIR=$(DESTDIR)$(PREFIX)/bin
 CFLAGS=-Wall -Werror\
 	-Wformat=2\
-	-I/usr/include/jemalloc\
+	-I/usr/local/include/jemalloc\
 	-O3
 
-LDFLAGS=-lm -ljemalloc
+LDFLAGS=-lm  -L/usr/local/lib/libjemalloc.a
 OS=$(shell uname|tr A-Z a-z)
 INSTALL=install
 
